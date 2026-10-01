@@ -46,6 +46,12 @@ bash scripts/run_sim.sh tb_biquad       # one of them
 
 Each testbench prints PASS/FAIL lines and exits non-zero on failure.
 
+## Turning this into a bootable image
+
+This repo stops at the bitstream. A bootable `BOOT.BIN` is FSBL + bitstream +
+U-Boot; the software repo (`zybo-audio`) consumes the `.bit` and `.xsa` pinned
+by hash and documents the assembly step.
+
 ## Versions
 
 - `v0.1.0` — 6 fixed biquad stages + peak limiter inserted in parallel
@@ -57,3 +63,11 @@ Each testbench prints PASS/FAIL lines and exits non-zero on failure.
   true-peak limiter mode, and a single long convolver bank (8192 taps).
   (There is no second/short FIR in these releases: `CAP1` bit7 = 0, see the
   `v0.3.0` note below. PBP is pending a slimmer engine.)
+- `v0.3.0` — the fittable release: `v0.2.0` engine minus the second FIR.
+  There is **no second FIR** here (`CAP1` bit7 = 0, `CAP4` = 0): PBP needs
+  ~1600 more LUTs than the device has left and is pending a slimmer engine.
+  Software refuses it cleanly (`SFIRAvailable()` is false).
+  Relative to the bitstream on hardware (09-21 build) this adds two fixes:
+  the delay ring is an explicit XPM RAM (a one-channel mute is gone) and
+  the input stage rounds (round-half-up) instead of truncating; one
+  testbench expectation follows the rounding.

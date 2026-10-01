@@ -145,33 +145,35 @@ module tb_engine_headroom;
         wait_acks(60);
         bad = 0;
         for (i = nc - 16; i < nc; i = i + 1) if (cap[i] !== 24'sd800000) bad = bad + 1;
-        if (bad == 0) $display("  OK   A1 hr=0 bypass: output is bit-exact with the input");
-        else begin $display("  FAIL A1 hr=0 bypass: output is bit-exact with the input"); fail = fail + 1; end
+        if (bad == 0) $display("  OK   A1 hr=0 bypass: output bit-exact == input");
+        else begin $display("  FAIL A1 hr=0 bypass: output bit-exact == input"); fail = fail + 1; end
 
         headroom = 1;
         cur = 24'sd123456;
         wait_acks(60);
         bad = 0;
         for (i = nc - 16; i < nc; i = i + 1) if (cap[i] !== 24'sd123456) bad = bad + 1;
-        if (bad == 0) $display("  OK   A2 hr=1 bypass: output is bit-exact with the input (the shift is only in the DSP path)");
-        else begin $display("  FAIL A2 hr=1 bypass: output is bit-exact with the input (the shift is only in the DSP path)"); fail = fail + 1; end
+        if (bad == 0) $display("  OK   A2 hr=1 bypass: output bit-exact == input (shifts only in DSP path)");
+        else begin $display("  FAIL A2 hr=1 bypass: output bit-exact == input (shifts only in DSP path)"); fail = fail + 1; end
 
         dsp_bypass = 0; headroom = 0;
         cur = 24'sh7FFFFF;
         wait_acks(60);
         bad = 0;
         for (i = nc - 16; i < nc; i = i + 1) if (cap[i] !== 24'sh7FFFFF) bad = bad + 1;
-        if (bad == 0) $display("  OK   B1 hr=0 empty table: output is bit-exact with the input (the legacy path matches bit for bit)");
-        else begin $display("  FAIL B1 hr=0 empty table: output is bit-exact with the input (the legacy path matches bit for bit)"); fail = fail + 1; end
+        if (bad == 0) $display("  OK   B1 hr=0 empty table: output bit-exact == input (legacy path bit-exact)");
+        else begin $display("  FAIL B1 hr=0 empty table: output bit-exact == input (legacy path bit-exact)"); fail = fail + 1; end
 
         headroom = 1;
         cur = 24'sh7FFFFF;
         wait_acks(60);
-        want = 24'sh7FFFFF >> HEADROOM << HEADROOM;
+
+        want = (24'sh7FFFFF + (1 << (HEADROOM-1))) >>> HEADROOM << HEADROOM;
+        if (want > 24'sh7FFFFF) want = 24'sh7FFFFF;
         bad = 0;
         for (i = nc - 16; i < nc; i = i + 1) if (cap[i] !== want[23:0]) bad = bad + 1;
-        if (bad == 0) $display("  OK   B2 hr=1 empty table: output == input with the low 3 bits dropped (lossy but deterministic)");
-        else begin $display("  FAIL B2 hr=1 empty table: output == input with the low 3 bits dropped (lossy but deterministic)"); fail = fail + 1; end
+        if (bad == 0) $display("  OK   B2 hr=1 empty table: round-half-up downshift + saturating restore (+FS in, +FS out)");
+        else begin $display("  FAIL B2 hr=1 empty table: round-half-up downshift + saturating restore (+FS in, +FS out)"); fail = fail + 1; end
 
         cur = -24'sd1234567;
         wait_acks(60);
@@ -184,7 +186,7 @@ module tb_engine_headroom;
             $display("       dbg: in=%h bus0=%h sel=%h up=%h hr=%b push=%h",
                      in_data, u_dut.bus[0], u_dut.lim_data_sel, u_dut.lim_up,
                      u_dut.headroom, u_dut.push_data);
-            $display("       expected %0d(%h), last 4: %0d(%h) %0d(%h) %0d(%h) %0d(%h)",
+            $display("       want %0d(%h), last 4: %0d(%h) %0d(%h) %0d(%h) %0d(%h)",
                      $signed(want[23:0]), want[23:0],
                      $signed(cap[nc-1]), cap[nc-1], $signed(cap[nc-2]), cap[nc-2],
                      $signed(cap[nc-3]), cap[nc-3], $signed(cap[nc-4]), cap[nc-4]);
@@ -201,10 +203,10 @@ module tb_engine_headroom;
             if ($signed(cap[i]) < 0) neg = neg + 1;
             if (cap[i] > 24'sd8300000) sat = sat + 1;
         end
-        if (neg == 0) $display("  OK   C1 full-scale +12dB: a positive input must never produce a negative value (saturation does not wrap)");
-        else begin $display("  FAIL C1 full-scale +12dB: a positive input must never produce a negative value (saturation does not wrap)"); fail = fail + 1; end
-        if (sat >= 16) $display("  OK   C2 full-scale +12dB: it really does saturate near +FS");
-        else begin $display("  FAIL C2 full-scale +12dB: it really does saturate near +FS"); fail = fail + 1; end
+        if (neg == 0) $display("  OK   C1 full-scale +12dB: positive input never goes negative (saturates, no wrap)");
+        else begin $display("  FAIL C1 full-scale +12dB: positive input never goes negative (saturates, no wrap)"); fail = fail + 1; end
+        if (sat >= 16) $display("  OK   C2 full-scale +12dB: does saturate near +FS");
+        else begin $display("  FAIL C2 full-scale +12dB: does saturate near +FS"); fail = fail + 1; end
 
         cur = 24'sh800000;
         wait_acks(200);
@@ -213,10 +215,10 @@ module tb_engine_headroom;
             if ($signed(cap[i]) > 0) pos = pos + 1;
             if ($signed(cap[i]) < -24'sd8300000) sat = sat + 1;
         end
-        if (pos == 0) $display("  OK   C3 negative full-scale +12dB: a negative input must never produce a positive value (saturation does not wrap)");
-        else begin $display("  FAIL C3 negative full-scale +12dB: a negative input must never produce a positive value (saturation does not wrap)"); fail = fail + 1; end
-        if (sat >= 16) $display("  OK   C4 negative full-scale +12dB: it really does saturate near -FS");
-        else begin $display("  FAIL C4 negative full-scale +12dB: it really does saturate near -FS"); fail = fail + 1; end
+        if (pos == 0) $display("  OK   C3 negative full-scale +12dB: negative input never goes positive (saturates, no wrap)");
+        else begin $display("  FAIL C3 negative full-scale +12dB: negative input never goes positive (saturates, no wrap)"); fail = fail + 1; end
+        if (sat >= 16) $display("  OK   C4 negative full-scale +12dB: does saturate near -FS");
+        else begin $display("  FAIL C4 negative full-scale +12dB: does saturate near -FS"); fail = fail + 1; end
 
         lim_bypass = 0; lim_tp = 0; lim_thr = 18'd3277;
         headroom = 1;
@@ -225,12 +227,12 @@ module tb_engine_headroom;
         bad = 0;
         for (i = nc - 32; i < nc; i = i + 1)
             if ($signed(cap[i]) > 24'sd8300000 || $signed(cap[i]) < 24'sd3000000) bad = bad + 1;
-        if (bad == 0) $display("  OK   D1 +12dB + limiter at 0.1FS: after restore the level lands at the 8x threshold order (the limiter holds the output)");
-        else begin $display("  FAIL D1 +12dB + limiter at 0.1FS: after restore the level lands at the 8x threshold order (the limiter holds the output)"); fail = fail + 1; end
+        if (bad == 0) $display("  OK   D1 +12dB + limiter 0.1FS: restored output at 8x-threshold magnitude (limiter holds output)");
+        else begin $display("  FAIL D1 +12dB + limiter 0.1FS: restored output at 8x-threshold magnitude (limiter holds output)"); fail = fail + 1; end
         $display("       last value %0d (8x threshold = 26216)", $signed(cap[nc-1]));
 
-        if (fail == 0) $display("== tb_engine_headroom: all passed ==");
-        else           $display("== tb_engine_headroom: %0d failure(s) ==", fail);
+        if (fail == 0) $display("== tb_engine_headroom: ALL PASSED ==");
+        else           $display("== tb_engine_headroom: %0d FAILED ==", fail);
         $finish;
     end
 

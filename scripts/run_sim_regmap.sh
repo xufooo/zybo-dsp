@@ -15,6 +15,7 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IP="$ROOT/build/ip/digilent/ip/axi_i2s_adi_1.2/hdl"
 export PATH="$XILINX_BIN:$PATH"
+XILINX_VIVADO="$(dirname "$XILINX_BIN")"
 
 mkdir -p "$ROOT/build/sim"; cd "$ROOT/build/sim"
 rm -rf xsim.dir *.log *.pb *.jou adi_common_v1_00_a axi_i2s_adi_v1_00_a
@@ -33,6 +34,7 @@ xvhdl --work axi_i2s_adi_v1_00_a "$IP/fifo_synchronizer.vhd" "$IP/i2s_clkgen.vhd
 echo "== work: IP top + insert layer + TB =="
 xvhdl --work work "$IP/axi_i2s_adi_S_AXI.vhd" "$IP/axi_i2s_adi_v1_2.vhd"
 
+xvlog -sv --work work "$XILINX_VIVADO/data/ip/xpm/xpm_memory/hdl/xpm_memory.sv"
 xvlog --work work "$IP/dsp_insert.v" "$IP/biquad_filter.v" "$IP/saturator.v" "$IP/limiter.v" \
                   "$IP/dsp_engine.v" "$IP/fir_bank.v" "$IP/fir_bank_long.v" \
                   "$IP/tp_log2.v" "$IP/tp_exp2.v" "$IP/truepeak_limiter.v" \
