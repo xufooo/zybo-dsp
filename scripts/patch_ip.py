@@ -13,6 +13,13 @@ OVERRIDES = {
     "biquad_filter.v": "hdl/biquad_filter.v",
     "limiter.v": "hdl/limiter.v",
     "saturator.v": "hdl/saturator.v",
+    "dsp_engine.v": "hdl/dsp_engine.v",
+    "fir_bank.v": "hdl/fir_bank.v",
+    "fir_bank_long.v": "hdl/fir_bank_long.v",
+
+    "truepeak_limiter.v": "hdl/truepeak_limiter.v",
+    "tp_log2.v": "hdl/tp_log2.v",
+    "tp_exp2.v": "hdl/tp_exp2.v",
     "axi_i2s_adi_v1_2.vhd": "hdl/axi_i2s_adi_v1_2.vhd",
     "axi_i2s_adi_S_AXI.vhd": "hdl/axi_i2s_adi_S_AXI.vhd",
 }
@@ -22,9 +29,18 @@ EXPECT_SIZE = {
     "biquad_filter.v": 2470,
     "limiter.v": 3282,
     "saturator.v": 666,
-    "axi_i2s_adi_v1_2.vhd": 17384,
+
+    "axi_i2s_adi_v1_2.vhd": 19949,
+
+    "dsp_engine.v": 54918,
+    "fir_bank.v": 6620,
+    "fir_bank_long.v": 3795,
+
+    "truepeak_limiter.v": 5492,
+    "tp_log2.v": 7999,
+    "tp_exp2.v": 8292,
     "axi_i2s_adi_S_AXI.vhd": 5553,
-    "component.xml": 89014,
+    "component.xml": 90977,
     "axi_i2s_adi_v1_2.tcl": 5508,
 }
 
@@ -33,7 +49,11 @@ PORT_LITERAL_OLD = ('spirit:dependency="(spirit:decode(id(&apos;MODELPARAM_VALUE
 PORT_LITERAL_NEW = PORT_LITERAL_OLD.replace('">5<', '">6<')
 
 VERILOG_FILES = ["hdl/dsp_insert.v", "hdl/biquad_filter.v",
-                 "hdl/limiter.v", "hdl/saturator.v"]
+                 "hdl/limiter.v", "hdl/saturator.v", "hdl/dsp_engine.v",
+
+                 "hdl/fir_bank.v",
+                 "hdl/fir_bank_long.v",
+                 "hdl/truepeak_limiter.v", "hdl/tp_log2.v", "hdl/tp_exp2.v"]
 
 FILE_BLOCK = """      <spirit:file>
         <spirit:name>{name}</spirit:name>
@@ -106,24 +126,20 @@ def patch_xml(path, *, check):
                 "    <spirit:parameter>\n      <spirit:name>C_S00_AXI_BASEADDR</spirit:name>",
                 1)
 
-    if VERILOG_FILES[0] not in src:
-        block = "".join(FILE_BLOCK.format(name=f) for f in VERILOG_FILES)
+    missing = [f for f in VERILOG_FILES if f not in src]
+    if missing:
+        block = "".join(FILE_BLOCK.format(name=f) for f in missing)
 
-        anchor_syn = "      <spirit:file>\n        <spirit:name>hdl/axi_i2s_adi_v1_2.vhd</spirit:name>\n        <spirit:fileType>vhdlSource</spirit:fileType>\n        <spirit:userFileType>CHECKSUM_c1ef5310</spirit:userFileType>\n      </spirit:file>\n"
-        if anchor_syn in src:
-            if not check:
-                src = src.replace(anchor_syn, anchor_syn + block, 1)
+        parts = src.split("    </spirit:fileSet>")
+        touched = 0
+        for i, part in enumerate(parts):
+            if (("hdl/dsp_insert.v" in part) or ("hdl/axi_i2s_adi_S_AXI.vhd" in part)) and (missing[-1] not in part):
+                parts[i] = part + block
+                touched += 1
+        if touched == 0:
+            problems.append("no fileSet to backfill (no fileSet holding our Verilog, and no insertion point)")
         else:
-            problems.append("the synthesis fileSet insertion point was not found")
-
-        anchor_sim = "      <spirit:file>\n        <spirit:name>hdl/axi_i2s_adi_S_AXI.vhd</spirit:name>\n        <spirit:fileType>vhdlSource</spirit:fileType>\n      </spirit:file>\n    </spirit:fileSet>"
-        if anchor_sim in src:
-            if not check:
-                src = src.replace(anchor_sim,
-                                  anchor_sim[:anchor_sim.index("    </spirit:fileSet>")]
-                                  + block + "    </spirit:fileSet>", 1)
-        else:
-            problems.append("the behavioral simulation fileSet insertion point was not found")
+            src = "    </spirit:fileSet>".join(parts)
 
     if problems:
         return problems
@@ -156,7 +172,7 @@ def patch_tcl(path, *, check):
 def copy_overrides(ip_dir, *, check):
     problems = []
     if not os.path.isdir(OVERRIDE_DIR):
-        return [f"missing the hdl override directory {OVERRIDE_DIR}"]
+        return [f"the hdl override directory {OVERRIDE_DIR} is missing"]
     for name, rel in OVERRIDES.items():
         s = os.path.join(OVERRIDE_DIR, name)
         if not os.path.isfile(s):
@@ -180,7 +196,7 @@ def main():
     check = "--check" in sys.argv
 
     if not os.path.isfile(os.path.join(ip_dir, "component.xml")):
-        print(f"✗ {ip_dir} has no component.xml (fetch the pristine upstream tree first)")
+        print(f"✗ {ip_dir} has no component.xml (fetch the pristine upstream first)")
         return 1
 
     problems = []
@@ -195,19 +211,20 @@ def main():
 
     if not check and not problems:
         for name in ("dsp_insert.v", "biquad_filter.v", "limiter.v", "saturator.v",
+                     "dsp_engine.v", "truepeak_limiter.v", "tp_log2.v", "tp_exp2.v",
                      "axi_i2s_adi_v1_2.vhd", "axi_i2s_adi_S_AXI.vhd"):
             p = os.path.join(ip_dir, "hdl", name)
             want = EXPECT_SIZE[name]
             if not os.path.isfile(p):
                 problems.append(f"missing file hdl/{name}")
             elif os.path.getsize(p) != want:
-                problems.append(f"hdl/{name} {os.path.getsize(p)} is {size} bytes ≠ fingerprint {want}")
+                problems.append(f"hdl/{name} is {os.path.getsize(p)} bytes ≠ fingerprint {want}")
 
         xml = open(os.path.join(ip_dir, "component.xml"), encoding="utf-8").read()
         for needle, desc in (
             ('spirit:id="PARAM_VALUE.C_S00_AXI_ADDR_WIDTH"', "the C_S00_AXI_ADDR_WIDTH user parameter"),
             ('spirit:id="MODELPARAM_VALUE.C_S00_AXI_ADDR_WIDTH" spirit:order="4" spirit:rangeType="long">7<', "modelParameter value = 7"),
-            ('">6</spirit:left>', "port width cache literal 6"),
+            ('">6</spirit:left>', "the port width cache literal 6"),
             ("hdl/dsp_insert.v", "the dsp_insert.v file entry"),
             ("hdl/limiter.v", "the limiter.v file entry"),
         ):
@@ -224,7 +241,7 @@ def main():
                 problems.append(f"xgui is missing {desc}")
 
     if problems:
-        print("✗ IP patch failed:")
+        print("✗ patching failed:")
         for p in problems:
             print("   -", p)
         return 1

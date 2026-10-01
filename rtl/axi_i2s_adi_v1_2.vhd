@@ -168,14 +168,28 @@ signal I2S_RESET_REG			: std_logic_vector(31 downto 0);
 signal I2S_CONTROL_REG			: std_logic_vector(31 downto 0);
 
 	signal DSP_CTRL_REG			: std_logic_vector(31 downto 0);
-	signal DSP_CIDX_REG			: integer range 0 to 31;
+	signal DSP_CIDX_REG			: integer range 0 to 65535;
 	signal DSP_CDAT_WR			: std_logic_vector(31 downto 0);
 	signal DSP_CDAT_WR_STB		: std_logic;
 	signal DSP_CDAT_RD			: std_logic_vector(31 downto 0);
 	signal dsp_nbands			: std_logic_vector(3 downto 0);
 
-	signal dsp_cidx_vec			: std_logic_vector(5 downto 0);
+	signal dsp_cidx_vec			: std_logic_vector(15 downto 0);
 	signal dsp_cidx_inc			: std_logic;
+
+	signal DSP_SLOT_ADDR_REG	: integer range 0 to 65535;
+	signal DSP_SLOT_DATA_WR		: std_logic_vector(31 downto 0);
+	signal DSP_SLOT_WR_STB		: std_logic;
+	signal dsp_slot_inc			: std_logic;
+	signal dsp_slot_vec			: std_logic_vector(15 downto 0);
+	signal dsp_commit			: std_logic;
+	signal DSP_STATUS			: std_logic_vector(31 downto 0);
+	signal DSP_CAP0				: std_logic_vector(31 downto 0);
+	signal DSP_CAP1				: std_logic_vector(31 downto 0);
+	signal DSP_CAP2				: std_logic_vector(31 downto 0);
+	signal DSP_CAP3				: std_logic_vector(31 downto 0);
+
+	signal DSP_CAP4				: std_logic_vector(31 downto 0);
 
 	signal LIM_THR_REG			: std_logic_vector(17 downto 0);
 	signal LIM_ATT_REG			: std_logic_vector(17 downto 0);
@@ -210,7 +224,7 @@ signal tx_fifo_stb : std_logic;
 signal rx_fifo_ack : std_logic;
 signal cnt : integer range 0 to 2**16-1;
 
-	component dsp_insert
+	component dsp_engine
 		generic (
 			SAMPLE_W : integer;
 			COEF_W   : integer;
@@ -229,14 +243,29 @@ signal cnt : integer range 0 to 2**16-1;
 			out_ack    : in  std_logic;
 			dsp_bypass : in  std_logic;
 			nbands     : in  std_logic_vector(3 downto 0);
-			cidx       : in  std_logic_vector(5 downto 0);
+			cidx       : in  std_logic_vector(15 downto 0);
 			cwr        : in  std_logic;
 			cdat       : in  std_logic_vector(31 downto 0);
 			cdat_rd    : out std_logic_vector(31 downto 0);
 			lim_bypass : in  std_logic;
 			lim_thr    : in  std_logic_vector(17 downto 0);
 			lim_att    : in  std_logic_vector(17 downto 0);
-			lim_rel    : in  std_logic_vector(17 downto 0)
+			lim_rel    : in  std_logic_vector(17 downto 0);
+
+			lim_tp     : in  std_logic;
+			headroom   : in  std_logic;
+
+			slot_addr  : in  std_logic_vector(15 downto 0);
+			slot_data  : in  std_logic_vector(31 downto 0);
+			slot_we    : in  std_logic;
+			bank_sel   : in  std_logic;
+			commit     : in  std_logic;
+			status     : out std_logic_vector(31 downto 0);
+			cap0       : out std_logic_vector(31 downto 0);
+			cap1       : out std_logic_vector(31 downto 0);
+			cap2       : out std_logic_vector(31 downto 0);
+			cap3       : out std_logic_vector(31 downto 0);
+			cap4       : out std_logic_vector(31 downto 0)
 		);
 	end component;
 
@@ -376,7 +405,7 @@ process (s00_axi_aclk)
 				drlast => DMA_REQ_TX_DRLAST
 			);
 
-		dsp_ins: component dsp_insert
+		dsp_ins: component dsp_engine
 			generic map (
 				SAMPLE_W => C_SLOT_WIDTH,
 
@@ -403,7 +432,21 @@ process (s00_axi_aclk)
 				lim_bypass => DSP_CTRL_REG(4),
 				lim_thr    => LIM_THR_REG,
 				lim_att    => LIM_ATT_REG,
-				lim_rel    => LIM_REL_REG
+				lim_rel    => LIM_REL_REG,
+
+				lim_tp     => DSP_CTRL_REG(18),
+				headroom   => DSP_CTRL_REG(19),
+				slot_addr  => dsp_slot_vec,
+				slot_data  => DSP_SLOT_DATA_WR,
+				slot_we    => DSP_SLOT_WR_STB,
+				bank_sel   => DSP_CTRL_REG(17),
+				commit     => dsp_commit,
+				status     => DSP_STATUS,
+				cap0       => DSP_CAP0,
+				cap1       => DSP_CAP1,
+				cap2       => DSP_CAP2,
+				cap3       => DSP_CAP3,
+				cap4       => DSP_CAP4
 			);
 	end generate;
 
@@ -483,7 +526,8 @@ process (s00_axi_aclk)
 	tx_fifo_reset		<= I2S_RESET_REG(1);
 
 	dsp_bypass		<= DSP_CTRL_REG(0);
-	dsp_cidx_vec	<= std_logic_vector(to_unsigned(DSP_CIDX_REG, 6));
+	dsp_cidx_vec	<= std_logic_vector(to_unsigned(DSP_CIDX_REG, 16));
+	dsp_slot_vec	<= std_logic_vector(to_unsigned(DSP_SLOT_ADDR_REG, 16));
 
 	process(DSP_CTRL_REG) is
 		variable nb : integer;
@@ -511,12 +555,21 @@ process (s00_axi_aclk)
 			when 8 => rd_data <=  x"0000000" & rx_fifo_full & rx_fifo_empty & tx_fifo_full & tx_fifo_empty;
 			when 10 => rd_data <= rx_sample & std_logic_vector(to_unsigned(cnt, 8));
 
-			when 12 => rd_data <= DSP_CTRL_REG and x"0000001F";
-			when 13 => rd_data <= (31 downto 6 => '0') & std_logic_vector(to_unsigned(DSP_CIDX_REG, 6));
+			when 12 => rd_data <= DSP_CTRL_REG and x"000F001F";
+
+			when 13 => rd_data <= (31 downto 16 => '0') & std_logic_vector(to_unsigned(DSP_CIDX_REG, 16));
 			when 14 => rd_data <= DSP_CDAT_RD;
 			when 15 => rd_data <= (31 downto 18 => '0') & LIM_THR_REG;
 			when 16 => rd_data <= (31 downto 18 => '0') & LIM_ATT_REG;
 			when 17 => rd_data <= (31 downto 18 => '0') & LIM_REL_REG;
+
+			when 20 => rd_data <= DSP_STATUS;
+			when 21 => rd_data <= DSP_CAP0;
+			when 22 => rd_data <= DSP_CAP1;
+			when 23 => rd_data <= DSP_CAP2;
+			when 24 => rd_data <= DSP_CAP3;
+
+			when 25 => rd_data <= DSP_CAP4;
 			when others => rd_data <= (others => '0');
 		end case;
 	end process;
@@ -531,6 +584,11 @@ process (s00_axi_aclk)
 				DSP_CTRL_REG <= x"00000001";
 				DSP_CIDX_REG <= 0;
 				dsp_cidx_inc <= '0';
+				DSP_SLOT_ADDR_REG <= 0;
+				dsp_slot_inc <= '0';
+				DSP_SLOT_DATA_WR <= (others => '0');
+				DSP_SLOT_WR_STB <= '0';
+				dsp_commit <= '0';
 				DSP_CDAT_WR <= (others => '0');
 				DSP_CDAT_WR_STB <= '0';
 
@@ -545,6 +603,8 @@ process (s00_axi_aclk)
 				I2S_RESET_REG(1) <= '0';
 				I2S_RESET_REG(2) <= '0';
 				DSP_CDAT_WR_STB <= '0';
+				DSP_SLOT_WR_STB <= '0';
+				dsp_commit <= '0';
 
 				if dsp_cidx_inc = '1' then
 					if DSP_CIDX_REG = DSP_NB*5 - 1 then
@@ -554,6 +614,16 @@ process (s00_axi_aclk)
 					end if;
 					dsp_cidx_inc <= '0';
 				end if;
+
+				if dsp_slot_inc = '1' then
+
+					if DSP_SLOT_ADDR_REG = 192 then
+						DSP_SLOT_ADDR_REG <= 0;
+					else
+						DSP_SLOT_ADDR_REG <= DSP_SLOT_ADDR_REG + 1;
+					end if;
+					dsp_slot_inc <= '0';
+				end if;
 				if wr_stb = '1' then
 					case wr_addr is
 						when 0 => I2S_RESET_REG <= wr_data;
@@ -561,9 +631,12 @@ process (s00_axi_aclk)
 						when 2 => I2S_CLK_CONTROL_REG <= wr_data;
 						when 6 => PERIOD_LEN_REG <= wr_data;
 
-						when 12 => DSP_CTRL_REG <= wr_data;
+						when 12 =>
+
+							DSP_CTRL_REG <= wr_data and x"FFFEFFFF";
+							dsp_commit <= wr_data(16);
 						when 13 =>
-							DSP_CIDX_REG <= to_integer(unsigned(wr_data(4 downto 0)));
+							DSP_CIDX_REG <= to_integer(unsigned(wr_data(15 downto 0)));
 							dsp_cidx_inc <= '0';
 						when 14 =>
 							DSP_CDAT_WR     <= wr_data;
@@ -572,6 +645,14 @@ process (s00_axi_aclk)
 						when 15 => LIM_THR_REG <= wr_data(17 downto 0);
 						when 16 => LIM_ATT_REG <= wr_data(17 downto 0);
 						when 17 => LIM_REL_REG <= wr_data(17 downto 0);
+
+						when 18 =>
+							DSP_SLOT_ADDR_REG <= to_integer(unsigned(wr_data(15 downto 0)));
+							dsp_slot_inc <= '0';
+						when 19 =>
+							DSP_SLOT_DATA_WR <= wr_data;
+							DSP_SLOT_WR_STB <= '1';
+							dsp_slot_inc <= '1';
 						when others => null;
 					end case;
 				end if;

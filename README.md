@@ -50,3 +50,10 @@ Each testbench prints PASS/FAIL lines and exits non-zero on failure.
 
 - `v0.1.0` — 6 fixed biquad stages + peak limiter inserted in parallel
   (`dsp_insert`). Fixed register map, coefficients in Q3.15.
+- `v0.2.0` — slot-table engine: a programmable chain of slots
+  (`NOP/BIQUAD/DYN/MIX2/DELAY/FIR/POLY/SAT/...`) committed atomically into
+  the hardware with dual-bank semantics, plus a capability self-report
+  (`CAP0..CAP4`) so software can tell a new bitstream from an old one, a
+  true-peak limiter mode, and a single long convolver bank (8192 taps).
+  (There is no second/short FIR in these releases: `CAP1` bit7 = 0, see the
+  `v0.3.0` note below. PBP is pending a slimmer engine.)

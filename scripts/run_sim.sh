@@ -19,16 +19,44 @@ mkdir -p "$ROOT/build/sim"
 cd "$ROOT/build/sim"
 rm -rf xsim.dir dsp *.log *.pb *.jou
 
-IPHDL="$ROOT/build/ip/digilent/ip/axi_i2s_adi_1.2/hdl"
+SRCHDL="$ROOT/rtl"
 
-xvlog --work dsp "$IPHDL/dsp_insert.v" "$IPHDL/biquad_filter.v" \
-      "$IPHDL/saturator.v" "$IPHDL/limiter.v"
+XILINX_VIVADO="$(dirname "$XILINX_BIN")"
+xvlog -sv --work dsp "$XILINX_VIVADO/data/ip/xpm/xpm_memory/hdl/xpm_memory.sv"
+xvlog --work dsp "$SRCHDL/dsp_insert.v" "$SRCHDL/biquad_filter.v" \
+      "$SRCHDL/saturator.v" "$SRCHDL/limiter.v" "$SRCHDL/dsp_engine.v" \
+      "$SRCHDL/fir_bank.v" "$SRCHDL/fir_bank_long.v" \
+      "$SRCHDL/tp_log2.v" "$SRCHDL/tp_exp2.v" "$SRCHDL/truepeak_limiter.v"
 xvlog --work dsp "$ROOT"/tb/*.v
 
+python3 "$ROOT/tools/tp_model.py" > /dev/null
+
+python3 "$ROOT/tools/pbp_model.py" > /dev/null
+
+python3 "$ROOT/tools/colm_model.py" > /dev/null
+
+python3 "$ROOT/tools/dynbass_model.py" > /dev/null
+
+if [ $# -gt 0 ]; then
+    TBS="$*"
+else
+    TBS="tb_biquad tb_limiter tb_dsp_insert tb_dsp_engine tb_engine_headroom \
+          tb_engine_dyn tb_engine_mix2 tb_engine_delay tb_tp_math tb_truepeak \
+          tb_truepeak_golden tb_fir_bank tb_fir_bank_long tb_engine_fir \
+          tb_engine_poly tb_engine_vbass_plan tb_engine_js \
+          tb_engine_xphase tb_engine_dynbass"
+fi
+
 rc=0
-for tb in tb_biquad tb_limiter tb_dsp_insert; do
+for tb in $TBS; do
     echo "== RUN $tb =="
-    xelab -L dsp "dsp.$tb" -s "${tb}_sim" -timescale 1ns/1ps > /dev/null
+
+    if ! xelab -L dsp "dsp.$tb" -s "${tb}_sim" -timescale 1ns/1ps > "$tb.elab.log" 2>&1; then
+        echo "== $tb: xelab failed =="
+        grep -E "ERROR" "$tb.elab.log" | head -20
+        rc=1
+        continue
+    fi
     xsim "${tb}_sim" -runall | grep -vE '^\s*$|^\*\*|^# xsim|^source |^Time resolution|^run -all|^exit$' || rc=1
 done
 exit $rc
