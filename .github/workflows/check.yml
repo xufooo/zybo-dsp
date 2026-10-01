@@ -1,0 +1,30 @@
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Repository gates
+        run: bash scripts/gates.sh
+
+  sim:
+    runs-on: [self-hosted, vivado]
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report toolchain
+        run: |
+          which xvlog || (echo "runner has no Vivado; skip" && exit 0)
+          xvlog --version
+      - name: Self-checking testbenches
+        run: |
+          which xvlog || exit 0
+          bash scripts/run_sim.sh

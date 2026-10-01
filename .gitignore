@@ -1,0 +1,16 @@
+# Vivado outputs — reproducible, never committed
+build/
+.Xil/
+*.bit
+*.xsa
+*.runs/
+*.cache/
+*.hw/
+*.jou
+*.log
+xsim.dir/
+*.pb
+# Python caches
+__pycache__/
+# Local notes
+NA/
