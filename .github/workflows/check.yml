@@ -16,8 +16,10 @@ jobs:
         run: bash scripts/gates.sh
 
   sim:
+    # Self-hosted Vivado runner - does not exist yet. This job only runs when
+    # triggered by hand after such a runner is registered; it never blocks CI.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, vivado]
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v4
       - name: Report toolchain
